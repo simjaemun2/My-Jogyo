@@ -20,6 +20,7 @@
       "notebook-writer.ts",
       "research-manager.ts",
       "session-manager.ts",
+      "agent-runner.ts",
       "gyoshu-completion.ts",
       "gyoshu-snapshot.ts",
       "notebook-search.ts",
@@ -30,7 +31,25 @@
     "skill": [
       "data-analysis",
       "experiment-design",
-      "ml-rigor"
+      "ml-rigor",
+      "arbitrage-detection",
+      "cache-management",
+      "dex-idl-parsing",
+      "dex-price-calculation",
+      "file-organizer",
+      "geyser-grpc-integration",
+      "jito-mev-bundle",
+      "mcp-builder",
+      "pict-test-designer",
+      "reporting-integrity-gate",
+      "root-cause-tracing",
+      "skill-creator",
+      "subagent-driven-development",
+      "swap-instruction-builder",
+      "systematic-debugging",
+      "test-driven-development",
+      "test-fixing",
+      "external-research-request"
     ],
     "lib": [
       "paths.ts",
@@ -59,6 +78,8 @@
     "bridge": [
       "gyoshu_bridge.py"
     ],
-    "plugin": ["gyoshu-hooks.ts"]
+    "plugin": [
+      "gyoshu-hooks.ts"
+    ]
   }
 }

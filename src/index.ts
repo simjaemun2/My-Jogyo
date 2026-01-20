@@ -6,6 +6,7 @@ import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { readFileNoFollowSync, openNoFollowSync } from "./lib/atomic-write";
 import { ensureDirSync, validatePathSegment } from "./lib/paths";
+import createClaudeCodeAnthropicAuth from "./plugin/claude-code-provider";
 
 import manifest from "./gyoshu-manifest.json";
 
@@ -866,8 +867,9 @@ function autoInstall(): InstallResult {
 }
 
 export const GyoshuPlugin: Plugin = async (ctx) => {
+  const auth = createClaudeCodeAnthropicAuth();
   // Always return a valid Hooks object, even on error
-  const emptyHooks = {};
+  const emptyHooks = { auth };
   
   try {
     const installResult = autoInstall();
@@ -897,7 +899,14 @@ export const GyoshuPlugin: Plugin = async (ctx) => {
     try {
       const { GyoshuPlugin: GyoshuHooks } = await import("./plugin/gyoshu-hooks");
       const hooks = await GyoshuHooks(ctx);
-      return hooks || emptyHooks;
+      if (!hooks) {
+        return emptyHooks;
+      }
+      return {
+        ...emptyHooks,
+        ...hooks,
+        auth: hooks.auth ?? auth,
+      };
     } catch (hooksError) {
       console.error(`❌ Gyoshu: Failed to initialize hooks: ${hooksError instanceof Error ? hooksError.message : String(hooksError)}`);
       return emptyHooks;

@@ -17,7 +17,7 @@ $ARGUMENTS
 
 This command runs in **AUTO mode** - bounded autonomous execution that:
 1. Creates or continues a session targeting the specified goal
-2. Runs a bounded loop: delegate to @jogyo → **verify with @baksa** → check completion
+2. Runs a bounded loop: delegate via `agent-runner` to @jogyo → **verify with @baksa** → check completion
 3. Continues until goal is COMPLETED, BLOCKED (needs user input), or budget exhausted
 
 ## Adversarial Verification in AUTO Mode
@@ -29,14 +29,14 @@ After EVERY @jogyo completion, execute the challenge loop:
 ### Challenge Loop (Max 3 Rounds)
 
 1. **Get Snapshot**: `gyoshu_snapshot(researchSessionID: "...")`
-2. **Invoke Critic**: `@baksa Challenge these claims with evidence: [from snapshot]`
+2. **Invoke Critic**: `agent-runner(agent="baksa", prompt="Challenge these claims with evidence: [from snapshot]")`
 3. **Evaluate Trust Score**:
    - **80-100 (VERIFIED)**: Accept result, continue to next cycle
    - **60-79 (PARTIAL)**: Accept with caveats, note limitations
    - **40-59 (DOUBTFUL)**: Send rework request to @jogyo
    - **0-39 (REJECTED)**: Escalate to BLOCKED status
 
-4. **If Rework Needed**:
+4. **If Rework Needed** (send via `agent-runner` to @jogyo):
    ```
    @jogyo CHALLENGE FAILED - REWORK REQUIRED (Round N/3)
    

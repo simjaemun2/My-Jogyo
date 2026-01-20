@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "anthropic/claude-opus-4-5-high",
+  "model": "openai/gpt-5.2-codex",
   "default_agent": "Gyoshu",
   "small_model": "anthropic/claude-haiku-4-5",
   "permission": {
@@ -11,9 +11,13 @@
   "plugin": [
     "oh-my-opencode",
     "opencode-openai-codex-auth",
-    "opencode-antigravity-auth"
+    "opencode-antigravity-auth@1.2.8",
+    "opencode-google-antigravity-auth@0.2.12"
   ],
   "agent": {
+    "Sisyphus": {
+      "model": "openai/gpt-5.2-codex"
+    },
     "build": {
       "tools": {
         "write": true,
@@ -84,7 +88,7 @@
     "playwright": {
       "type": "local",
       "command": ["npx", "@playwright/mcp@latest"]
-    },
+    }
   },
   "provider": {
     "google-vertex": {
@@ -111,6 +115,18 @@
       "name": "Anthropic",
       "npm": "@ai-sdk/anthropic",
       "options": {
+        "claudeCode": {
+          "enabled": true,
+          "cliPath": "claude",
+          "timeoutMs": 300000,
+          "forceGlobalFetch": true,
+          "permissionMode": "dontAsk",
+          "noSessionPersistence": true,
+          "maxTurns": 1,
+          "modelMap": {
+            "claude-opus-4-5-high": "claude-code"
+          }
+        }
       },
       "models": {
         "claude-sonnet-4-5": {
@@ -154,6 +170,9 @@
             "thinking": {
               "type": "enabled",
               "budgetTokens": 64000
+            },
+            "claudeCode": {
+              "cliModel": "claude-code"
             }
           }
         }
@@ -335,6 +354,128 @@
         },
         "gpt-5.2-xhigh": {
           "name": "GPT 5.2 Extra High (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "options": {
+            "reasoningEffort": "xhigh",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.2-codex": {
+          "name": "GPT 5.2 Codex (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "options": {
+            "reasoningEffort": "xhigh",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          },
+          "variants": {
+            "low": {
+              "reasoningEffort": "low",
+              "reasoningSummary": "auto",
+              "textVerbosity": "medium"
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "reasoningSummary": "auto",
+              "textVerbosity": "medium"
+            },
+            "high": {
+              "reasoningEffort": "high",
+              "reasoningSummary": "detailed",
+              "textVerbosity": "medium"
+            },
+            "xhigh": {
+              "reasoningEffort": "xhigh",
+              "reasoningSummary": "detailed",
+              "textVerbosity": "medium"
+            }
+          }
+        },
+        "gpt-5.2-codex-low": {
+          "name": "GPT 5.2 Codex Low (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "options": {
+            "reasoningEffort": "low",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.2-codex-medium": {
+          "name": "GPT 5.2 Codex Medium (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "options": {
+            "reasoningEffort": "medium",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.2-codex-high": {
+          "name": "GPT 5.2 Codex High (OAuth)",
+          "limit": {
+            "context": 272000,
+            "output": 128000
+          },
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "options": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "detailed",
+            "textVerbosity": "medium",
+            "include": [
+              "reasoning.encrypted_content"
+            ],
+            "store": false
+          }
+        },
+        "gpt-5.2-codex-xhigh": {
+          "name": "GPT 5.2 Codex Extra High (OAuth)",
           "limit": {
             "context": 272000,
             "output": 128000

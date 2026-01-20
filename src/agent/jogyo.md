@@ -1,7 +1,7 @@
 ---
-mode: subagent
+mode: primary
 description: Scientific research agent with Python REPL and structured output markers
-model: opencode/minimax-m2.1-free
+model: anthropic/claude-opus-4-5-high
 maxSteps: 50
 tools:
   python-repl: true

@@ -1,7 +1,7 @@
 ---
-mode: subagent
+mode: primary
 description: Adversarial PhD reviewer that challenges Jogyo's research claims and verifies evidence
-model: opencode/minimax-m2.1-free
+model: google/anthropic-gemini-3-pro-high
 maxSteps: 15
 tools:
   read: true

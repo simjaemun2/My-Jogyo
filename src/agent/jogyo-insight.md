@@ -1,7 +1,7 @@
 ---
 mode: subagent
 description: Gathers evidence from previous notebooks, URLs, and documentation for research support
-model: opencode/minimax-m2.1-free
+model: anthropic/claude-opus-4-5-high
 maxSteps: 15
 tools:
   read: true

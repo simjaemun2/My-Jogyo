@@ -576,6 +576,52 @@ export function getRuntimeDir(): string {
 }
 
 /**
+ * Get ordered runtime directory candidates for recovery lookups.
+ * Does not create directories, only returns potential locations.
+ */
+export function getRuntimeDirCandidates(): string[] {
+  const candidates: string[] = [];
+  const addCandidate = (dir: string | undefined) => {
+    if (!dir) return;
+    if (!candidates.includes(dir)) candidates.push(dir);
+  };
+
+  const envRuntime = process.env[ENV_RUNTIME_DIR];
+  if (envRuntime && isSecureRuntimeDir(envRuntime)) {
+    addCandidate(envRuntime);
+  }
+
+  const xdgRuntime = process.env.XDG_RUNTIME_DIR;
+  if (xdgRuntime && isSecureRuntimeDir(xdgRuntime)) {
+    addCandidate(path.join(xdgRuntime, "gyoshu"));
+  }
+
+  if (process.platform === "linux") {
+    const uid = process.getuid?.();
+    if (typeof uid === "number") {
+      const runUser = path.join("/run", "user", String(uid));
+      if (isSecureRuntimeDir(runUser)) {
+        addCandidate(path.join(runUser, "gyoshu"));
+      }
+    }
+  }
+
+  const platform = process.platform;
+  if (platform === "darwin") {
+    addCandidate(path.join(os.homedir(), "Library", "Caches", "gyoshu", "runtime"));
+  } else if (platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    addCandidate(path.join(localAppData, "gyoshu", "runtime"));
+  } else if (platform === "linux") {
+    addCandidate(path.join(os.homedir(), ".cache", "gyoshu", "runtime"));
+  }
+
+  addCandidate(path.join(os.tmpdir(), "gyoshu", "runtime"));
+
+  return candidates;
+}
+
+/**
  * Shorten a session ID to fit within Unix socket path constraints.
  * Uses SHA256 hash truncated to 12 hex chars (48 bits).
  *
@@ -597,6 +643,21 @@ export function shortenSessionId(sessionId: string): string {
     .update(sessionId)
     .digest("hex")
     .slice(0, SHORT_SESSION_ID_LENGTH);
+}
+
+/**
+ * Get candidate session directories for a full session ID across runtime paths.
+ */
+export function getSessionDirCandidates(sessionId: string): string[] {
+  const shortId = shortenSessionId(sessionId);
+  return getRuntimeDirCandidates().map((runtimeDir) => path.join(runtimeDir, shortId));
+}
+
+/**
+ * Get candidate session directories for an already-shortened session ID.
+ */
+export function getSessionDirCandidatesByShortId(shortId: string): string[] {
+  return getRuntimeDirCandidates().map((runtimeDir) => path.join(runtimeDir, shortId));
 }
 
 /**

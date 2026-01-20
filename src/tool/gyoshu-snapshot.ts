@@ -20,6 +20,9 @@ import { fileExists, readFile, readFileNoFollow } from "../lib/atomic-write";
 import { 
   getCheckpointDir, 
   getSessionDir,
+  getSessionDirCandidates,
+  getSessionDirCandidatesByShortId,
+  getRuntimeDirCandidates,
   getReportDir,
   getNotebookPath,
   getLegacyArtifactsDir, 
@@ -427,6 +430,7 @@ function calculateElapsedMinutes(createdAt: string): number {
 
 const BRIDGE_META_FILE = "bridge_meta.json";
 const SESSION_MANIFEST_FILE = "session_manifest.json";
+const SHORT_SESSION_ID_REGEX = /^[0-9a-f]{12}$/i;
 
 /**
  * Result of loading a session manifest, including source for observability.
@@ -435,6 +439,9 @@ const SESSION_MANIFEST_FILE = "session_manifest.json";
 interface ManifestLoadResult {
   manifest: SessionManifest;
   source: "session_manifest" | "bridge_meta" | "legacy_manifest";
+  sessionDir?: string;
+  manifestPath?: string;
+  bridgeMeta?: BridgeMeta;
 }
 
 /**
@@ -451,8 +458,17 @@ function getBridgeMetaPath(sessionId: string): string {
   return path.join(getSessionDir(sessionId), BRIDGE_META_FILE);
 }
 
-async function readBridgeMeta(sessionId: string): Promise<BridgeMeta | null> {
-  const metaPath = getBridgeMetaPath(sessionId);
+function isShortSessionId(sessionId: string): boolean {
+  return SHORT_SESSION_ID_REGEX.test(sessionId);
+}
+
+function getSessionDirCandidatesForSessionId(sessionId: string): string[] {
+  return isShortSessionId(sessionId)
+    ? getSessionDirCandidatesByShortId(sessionId)
+    : getSessionDirCandidates(sessionId);
+}
+
+async function readBridgeMetaPath(metaPath: string): Promise<BridgeMeta | null> {
   if (!(await fileExists(metaPath))) {
     return null;
   }
@@ -465,6 +481,40 @@ async function readBridgeMeta(sessionId: string): Promise<BridgeMeta | null> {
   } catch {
     return null;
   }
+}
+
+async function readBridgeMeta(sessionId: string): Promise<BridgeMeta | null> {
+  return readBridgeMetaPath(getBridgeMetaPath(sessionId));
+}
+
+async function resolveSessionIdFromShortId(shortId: string): Promise<string | null> {
+  if (!isShortSessionId(shortId)) return null;
+
+  for (const sessionDir of getSessionDirCandidatesByShortId(shortId)) {
+    const bridgeMetaPath = path.join(sessionDir, BRIDGE_META_FILE);
+    const bridgeMeta = await readBridgeMetaPath(bridgeMetaPath);
+    if (bridgeMeta?.sessionId) {
+      return bridgeMeta.sessionId;
+    }
+
+    const manifestPath = path.join(sessionDir, SESSION_MANIFEST_FILE);
+    if (await fileExists(manifestPath)) {
+      const manifest = await readFile<SessionManifest>(manifestPath, true).catch(() => null);
+      if (manifest?.researchSessionID) {
+        return manifest.researchSessionID;
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildRuntimeHint(): string {
+  const runtimeDirs = getRuntimeDirCandidates();
+  const envRuntime = process.env.GYOSHU_RUNTIME_DIR ?? "(unset)";
+  const xdgRuntime = process.env.XDG_RUNTIME_DIR ?? "(unset)";
+  const runtimeList = runtimeDirs.length > 0 ? runtimeDirs.join(", ") : "(none)";
+  return `Runtime dirs checked: ${runtimeList}. GYOSHU_RUNTIME_DIR=${envRuntime}, XDG_RUNTIME_DIR=${xdgRuntime}.`;
 }
 
 /**
@@ -501,20 +551,31 @@ function createMinimalManifestFromBridgeMeta(sessionId: string, bridgeMeta: Brid
  * Returns null if session not found in any location.
  */
 async function loadSessionManifest(sessionId: string): Promise<ManifestLoadResult | null> {
-  // 1. Try session_manifest.json first (canonical location)
-  const manifestPath = getManifestPath(sessionId);
-  if (await fileExists(manifestPath)) {
-    const manifest = await readFile<SessionManifest>(manifestPath, true).catch(() => null);
-    if (manifest) {
-      return { manifest, source: "session_manifest" };
+  const sessionDirs = getSessionDirCandidatesForSessionId(sessionId);
+  for (const sessionDir of sessionDirs) {
+    // 1. Try session_manifest.json first (canonical location)
+    const manifestPath = path.join(sessionDir, SESSION_MANIFEST_FILE);
+    if (await fileExists(manifestPath)) {
+      const manifest = await readFile<SessionManifest>(manifestPath, true).catch(() => null);
+      if (manifest) {
+        return { manifest, source: "session_manifest", sessionDir, manifestPath };
+      }
     }
-  }
 
-  // 2. Fall back to bridge_meta.json (created by python-repl.ts)
-  const bridgeMeta = await readBridgeMeta(sessionId);
-  if (bridgeMeta) {
-    const manifest = createMinimalManifestFromBridgeMeta(sessionId, bridgeMeta);
-    return { manifest, source: "bridge_meta" };
+    // 2. Fall back to bridge_meta.json (created by python-repl.ts)
+    const bridgeMetaPath = path.join(sessionDir, BRIDGE_META_FILE);
+    const bridgeMeta = await readBridgeMetaPath(bridgeMetaPath);
+    if (bridgeMeta) {
+      const resolvedId = bridgeMeta.sessionId || sessionId;
+      const manifest = createMinimalManifestFromBridgeMeta(resolvedId, bridgeMeta);
+      return {
+        manifest,
+        source: "bridge_meta",
+        sessionDir,
+        manifestPath: path.join(sessionDir, SESSION_MANIFEST_FILE),
+        bridgeMeta,
+      };
+    }
   }
 
   // 3. Fall back to legacy manifest path
@@ -522,7 +583,7 @@ async function loadSessionManifest(sessionId: string): Promise<ManifestLoadResul
   if (await fileExists(legacyPath)) {
     const manifest = await readFile<SessionManifest>(legacyPath, true).catch(() => null);
     if (manifest) {
-      return { manifest, source: "legacy_manifest" };
+      return { manifest, source: "legacy_manifest", manifestPath: legacyPath };
     }
   }
 
@@ -628,29 +689,52 @@ export default tool({
       includeReplState = false,
     } = args;
 
-    validateSessionId(researchSessionID);
+    const inputSessionID = researchSessionID;
+    validateSessionId(inputSessionID);
+
+    let resolvedSessionID = inputSessionID;
+    if (isShortSessionId(inputSessionID)) {
+      const resolved = await resolveSessionIdFromShortId(inputSessionID);
+      if (resolved) {
+        resolvedSessionID = resolved;
+      }
+    }
+
+    if (resolvedSessionID !== inputSessionID) {
+      validateSessionId(resolvedSessionID);
+    }
 
     // Load session manifest using same fallback chain as gyoshu-completion.ts:
     // 1. session_manifest.json → 2. bridge_meta.json → 3. legacy manifest
-    const loadResult = await loadSessionManifest(researchSessionID);
+    const loadResult = await loadSessionManifest(resolvedSessionID);
     
     if (!loadResult) {
+      const shortHint = isShortSessionId(inputSessionID)
+        ? " If you passed a short session ID, provide the full researchSessionID."
+        : "";
       return JSON.stringify({
         success: false,
-        error: `Session '${researchSessionID}' not found`,
+        error: `Session '${inputSessionID}' not found. ${buildRuntimeHint()}${shortHint}`,
         snapshot: null,
       });
     }
 
-    const { manifest, source: manifestSource } = loadResult;
+    const { manifest, source: manifestSource, sessionDir, bridgeMeta: bridgeMetaFromLoad } = loadResult;
+    if (manifest.researchSessionID && manifest.researchSessionID !== resolvedSessionID) {
+      resolvedSessionID = manifest.researchSessionID;
+    }
     const notebookPath = manifest.notebookPath;
     const reportTitle = manifest.reportTitle || 
       manifest.goal?.toLowerCase().replace(/\s+/g, "-").slice(0, 50);
 
     // Read bridge meta separately for verification state (if not already loaded via manifest)
-    const bridgeMeta = manifestSource === "bridge_meta" 
-      ? await readBridgeMeta(researchSessionID) 
-      : await readBridgeMeta(researchSessionID);
+    let bridgeMeta = bridgeMetaFromLoad ?? null;
+    if (!bridgeMeta && sessionDir) {
+      bridgeMeta = await readBridgeMetaPath(path.join(sessionDir, BRIDGE_META_FILE));
+    }
+    if (!bridgeMeta) {
+      bridgeMeta = await readBridgeMeta(resolvedSessionID);
+    }
 
     // Read notebook - try canonical path first, then manifest path
     let notebook: Notebook | null = null;
@@ -663,7 +747,7 @@ export default tool({
     }
 
     // Scan artifacts using canonical report dir with legacy fallback
-    const artifacts = await scanReportArtifacts(reportTitle, researchSessionID);
+    const artifacts = await scanReportArtifacts(reportTitle, resolvedSessionID);
 
     let lastCheckpoint: CheckpointInfo | undefined = undefined;
     let resumable = false;
@@ -782,7 +866,7 @@ export default tool({
 
     // Build complete snapshot
     const snapshot: SessionSnapshot = {
-      sessionId: researchSessionID,
+      sessionId: resolvedSessionID,
       mode: manifest.mode || "unknown",
       goalStatus: manifest.goalStatus || "unknown",
       goal: manifest.goal,

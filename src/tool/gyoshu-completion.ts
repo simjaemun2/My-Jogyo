@@ -8,19 +8,28 @@ import { tool } from "@opencode-ai/plugin";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { durableAtomicWrite, fileExists, readFile, readFileNoFollow } from "../lib/atomic-write";
-import { getSessionDir, getNotebookPath, getLegacyManifestPath, validatePathSegment } from "../lib/paths";
+import {
+  getSessionDir,
+  getSessionDirCandidates,
+  getSessionDirCandidatesByShortId,
+  getRuntimeDirCandidates,
+  getNotebookPath,
+  getLegacyManifestPath,
+  validatePathSegment,
+} from "../lib/paths";
 import { gatherReportContext, ReportContext, generateReport } from "../lib/report-markdown";
 import { exportToPdf, PdfExportResult } from "../lib/pdf-export";
 import { runQualityGates, QualityGateResult } from "../lib/quality-gates";
 import { evaluateGoalGate, recommendPivot, GoalGateResult } from "../lib/goal-gates";
 import { evaluateReportGate, ReportGateResult } from "../lib/report-gates";
 import { extractFrontmatter, GyoshuFrontmatter } from "../lib/notebook-frontmatter";
-import type { Notebook } from "../lib/cell-identity";
+import { ensureCellId, type Notebook } from "../lib/cell-identity";
 import { getReportLockPath, DEFAULT_LOCK_TIMEOUT_MS } from "../lib/lock-paths";
 import { withLock } from "../lib/session-lock";
 import { isValidBridgeMeta, type BridgeMeta } from "../lib/bridge-meta";
 
 const BRIDGE_META_FILE = "bridge_meta.json";
+const SHORT_SESSION_ID_REGEX = /^[0-9a-f]{12}$/i;
 
 interface KeyResult {
   name: string;
@@ -57,6 +66,14 @@ interface SessionManifest {
   updated: string;
   status: "active" | "completed" | "archived";
   notebookPath: string;
+  executionOrder?: string[];
+  executedCells?: Record<string, {
+    executionCount: number;
+    contentHash: string;
+    timestamp: string;
+    success: boolean;
+  }>;
+  reportTitle?: string;
   goalStatus?: string; // COMPLETED | IN_PROGRESS | BLOCKED | ABORTED | FAILED
   completion?: CompletionRecord;
   [key: string]: unknown;
@@ -68,6 +85,97 @@ interface ValidationWarning {
   severity: "warning" | "error";
 }
 
+type ExecutedCellAutofillSource = "executionOrder" | "executedCells" | "notebook";
+
+interface ExecutedCellAutofillResult {
+  cellIds: string[];
+  source: ExecutedCellAutofillSource;
+}
+
+function normalizeCellIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const filtered = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  return Array.from(new Set(filtered));
+}
+
+function normalizeExecutedCellKeys(value: unknown): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const keys = Object.keys(value).filter((key) => key.trim().length > 0);
+  return Array.from(new Set(keys));
+}
+
+async function resolveNotebookPathForAutofill(
+  manifest: SessionManifest,
+  reportTitle?: string
+): Promise<string | null> {
+  const candidates: string[] = [];
+  if (manifest.notebookPath && manifest.notebookPath.trim().length > 0) {
+    candidates.push(manifest.notebookPath);
+  }
+
+  const effectiveReportTitle = reportTitle
+    ?? (typeof manifest.reportTitle === "string" ? manifest.reportTitle : undefined);
+  if (effectiveReportTitle) {
+    try {
+      candidates.push(getNotebookPath(effectiveReportTitle));
+    } catch {
+      // Ignore invalid reportTitle candidates.
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (await fileExists(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function extractExecutedCellIdsFromNotebook(notebookPath: string): Promise<string[]> {
+  try {
+    const notebookContent = await readFileNoFollow(notebookPath);
+    const notebook = JSON.parse(notebookContent) as Notebook;
+    if (!notebook || !Array.isArray(notebook.cells)) return [];
+
+    const cellIds: string[] = [];
+    notebook.cells.forEach((cell, index) => {
+      if (cell.cell_type !== "code") return;
+      if (cell.execution_count === null || cell.execution_count === undefined) return;
+      cellIds.push(ensureCellId(cell, index, notebookPath));
+    });
+
+    return Array.from(new Set(cellIds));
+  } catch {
+    return [];
+  }
+}
+
+async function autofillExecutedCellIds(
+  manifest: SessionManifest,
+  reportTitle?: string
+): Promise<ExecutedCellAutofillResult | null> {
+  const executionOrderIds = normalizeCellIdList(manifest.executionOrder);
+  if (executionOrderIds.length > 0) {
+    return { cellIds: executionOrderIds, source: "executionOrder" };
+  }
+
+  const executedCellIds = normalizeExecutedCellKeys(manifest.executedCells);
+  if (executedCellIds.length > 0) {
+    return { cellIds: executedCellIds, source: "executedCells" };
+  }
+
+  const notebookPath = await resolveNotebookPathForAutofill(manifest, reportTitle);
+  if (notebookPath) {
+    const notebookCellIds = await extractExecutedCellIdsFromNotebook(notebookPath);
+    if (notebookCellIds.length > 0) {
+      return { cellIds: notebookCellIds, source: "notebook" };
+    }
+  }
+
+  return null;
+}
+
 function getManifestPath(sessionId: string): string {
   return path.join(getSessionDir(sessionId), "session_manifest.json");
 }
@@ -76,8 +184,17 @@ function getBridgeMetaPath(sessionId: string): string {
   return path.join(getSessionDir(sessionId), BRIDGE_META_FILE);
 }
 
-async function readBridgeMeta(sessionId: string): Promise<BridgeMeta | null> {
-  const metaPath = getBridgeMetaPath(sessionId);
+function isShortSessionId(sessionId: string): boolean {
+  return SHORT_SESSION_ID_REGEX.test(sessionId);
+}
+
+function getSessionDirCandidatesForSessionId(sessionId: string): string[] {
+  return isShortSessionId(sessionId)
+    ? getSessionDirCandidatesByShortId(sessionId)
+    : getSessionDirCandidates(sessionId);
+}
+
+async function readBridgeMetaPath(metaPath: string): Promise<BridgeMeta | null> {
   if (!(await fileExists(metaPath))) {
     return null;
   }
@@ -90,6 +207,40 @@ async function readBridgeMeta(sessionId: string): Promise<BridgeMeta | null> {
   } catch {
     return null;
   }
+}
+
+async function readBridgeMeta(sessionId: string): Promise<BridgeMeta | null> {
+  return readBridgeMetaPath(getBridgeMetaPath(sessionId));
+}
+
+async function resolveSessionIdFromShortId(shortId: string): Promise<string | null> {
+  if (!isShortSessionId(shortId)) return null;
+
+  for (const sessionDir of getSessionDirCandidatesByShortId(shortId)) {
+    const bridgeMetaPath = path.join(sessionDir, BRIDGE_META_FILE);
+    const bridgeMeta = await readBridgeMetaPath(bridgeMetaPath);
+    if (bridgeMeta?.sessionId) {
+      return bridgeMeta.sessionId;
+    }
+
+    const manifestPath = path.join(sessionDir, "session_manifest.json");
+    if (await fileExists(manifestPath)) {
+      const manifest = await readFile<SessionManifest>(manifestPath, true).catch(() => null);
+      if (manifest?.researchSessionID) {
+        return manifest.researchSessionID;
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildRuntimeHint(): string {
+  const runtimeDirs = getRuntimeDirCandidates();
+  const envRuntime = process.env.GYOSHU_RUNTIME_DIR ?? "(unset)";
+  const xdgRuntime = process.env.XDG_RUNTIME_DIR ?? "(unset)";
+  const runtimeList = runtimeDirs.length > 0 ? runtimeDirs.join(", ") : "(none)";
+  return `Runtime dirs checked: ${runtimeList}. GYOSHU_RUNTIME_DIR=${envRuntime}, XDG_RUNTIME_DIR=${xdgRuntime}.`;
 }
 
 function createMinimalManifestFromBridgeMeta(
@@ -111,28 +262,40 @@ function createMinimalManifestFromBridgeMeta(
 interface ManifestLoadResult {
   manifest: SessionManifest;
   source: "session_manifest" | "bridge_meta" | "legacy_manifest";
+  sessionDir?: string;
+  manifestPath?: string;
 }
 
 async function loadSessionManifest(sessionId: string): Promise<ManifestLoadResult | null> {
-  const manifestPath = getManifestPath(sessionId);
-  if (await fileExists(manifestPath)) {
-    const manifest = await readFile<SessionManifest>(manifestPath, true).catch(() => null);
-    if (manifest) {
-      return { manifest, source: "session_manifest" };
+  const sessionDirs = getSessionDirCandidatesForSessionId(sessionId);
+  for (const sessionDir of sessionDirs) {
+    const manifestPath = path.join(sessionDir, "session_manifest.json");
+    if (await fileExists(manifestPath)) {
+      const manifest = await readFile<SessionManifest>(manifestPath, true).catch(() => null);
+      if (manifest) {
+        return { manifest, source: "session_manifest", sessionDir, manifestPath };
+      }
     }
-  }
 
-  const bridgeMeta = await readBridgeMeta(sessionId);
-  if (bridgeMeta) {
-    const manifest = createMinimalManifestFromBridgeMeta(sessionId, bridgeMeta);
-    return { manifest, source: "bridge_meta" };
+    const bridgeMetaPath = path.join(sessionDir, BRIDGE_META_FILE);
+    const bridgeMeta = await readBridgeMetaPath(bridgeMetaPath);
+    if (bridgeMeta) {
+      const resolvedId = bridgeMeta.sessionId || sessionId;
+      const manifest = createMinimalManifestFromBridgeMeta(resolvedId, bridgeMeta);
+      return {
+        manifest,
+        source: "bridge_meta",
+        sessionDir,
+        manifestPath: path.join(sessionDir, "session_manifest.json"),
+      };
+    }
   }
 
   const legacyPath = getLegacyManifestPath(sessionId);
   if (await fileExists(legacyPath)) {
     const manifest = await readFile<SessionManifest>(legacyPath, true).catch(() => null);
     if (manifest) {
-      return { manifest, source: "legacy_manifest" };
+      return { manifest, source: "legacy_manifest", manifestPath: legacyPath };
     }
   }
 
@@ -371,25 +534,64 @@ export default tool({
   async execute(args) {
     const { researchSessionID, status, summary, evidence, nextSteps, blockers, exportPdf, reportTitle, challengeRound, challengeResponses } = args;
 
-    validateSessionId(researchSessionID);
+    const inputSessionID = researchSessionID;
+    validateSessionId(inputSessionID);
 
-    const manifestLoadResult = await loadSessionManifest(researchSessionID);
+    let resolvedSessionID = inputSessionID;
+    if (isShortSessionId(inputSessionID)) {
+      const resolved = await resolveSessionIdFromShortId(inputSessionID);
+      if (resolved) {
+        resolvedSessionID = resolved;
+      }
+    }
+
+    if (resolvedSessionID !== inputSessionID) {
+      validateSessionId(resolvedSessionID);
+    }
+
+    const manifestLoadResult = await loadSessionManifest(resolvedSessionID);
     if (!manifestLoadResult) {
+      const shortHint = isShortSessionId(inputSessionID)
+        ? " If you passed a short session ID, provide the full researchSessionID."
+        : "";
       throw new Error(
-        `Session '${researchSessionID}' not found. ` +
+        `Session '${inputSessionID}' not found. ` +
         `No session_manifest.json, bridge_meta.json, or legacy manifest found. ` +
+        `${buildRuntimeHint()}${shortHint} ` +
         `Ensure the session was created via python-repl before calling completion.`
       );
     }
-    const { manifest: initialManifest, source: manifestSource } = manifestLoadResult;
+    const { manifest: initialManifest, source: manifestSource, manifestPath: resolvedManifestPath } = manifestLoadResult;
+    if (initialManifest.researchSessionID && initialManifest.researchSessionID !== resolvedSessionID) {
+      resolvedSessionID = initialManifest.researchSessionID;
+    }
 
     const typedEvidence = evidence as CompletionEvidence | undefined;
     const typedBlockers = blockers as string[] | undefined;
     const typedChallengeResponses = challengeResponses as ChallengeResponse[] | undefined;
 
+    const autofillWarnings: ValidationWarning[] = [];
+    if (
+      typedEvidence
+      && (!Array.isArray(typedEvidence.executedCellIds) || typedEvidence.executedCellIds.length === 0)
+    ) {
+      const autofillResult = await autofillExecutedCellIds(
+        initialManifest,
+        reportTitle ?? initialManifest.reportTitle
+      );
+      if (autofillResult?.cellIds.length) {
+        typedEvidence.executedCellIds = autofillResult.cellIds;
+        autofillWarnings.push({
+          code: "EXECUTED_CELLS_AUTOFILL",
+          message: `Autofilled ${autofillResult.cellIds.length} cell(s) from ${autofillResult.source}`,
+          severity: "warning",
+        });
+      }
+    }
+
     const baseWarnings = validateEvidence(status, typedEvidence, typedBlockers);
     const challengeWarnings = validateChallengeEvidence(challengeRound, typedEvidence, typedChallengeResponses);
-    const warnings = [...baseWarnings, ...challengeWarnings];
+    const warnings = [...autofillWarnings, ...baseWarnings, ...challengeWarnings];
     const valid = !hasErrors(warnings);
 
     let qualityGateResult: QualityGateResult | undefined;
@@ -531,7 +733,7 @@ export default tool({
       }
     }
 
-    const manifestPath = getManifestPath(researchSessionID);
+    const manifestPath = resolvedManifestPath ?? getManifestPath(resolvedSessionID);
     const completionRecord: CompletionRecord = {
       timestamp: new Date().toISOString(),
       status: adjustedStatus,
@@ -567,7 +769,8 @@ export default tool({
 
     const response: Record<string, unknown> = {
       success: valid,
-      researchSessionID,
+      researchSessionID: resolvedSessionID,
+      inputSessionID: inputSessionID !== resolvedSessionID ? inputSessionID : undefined,
       status: adjustedStatus,
       originalStatus: status !== adjustedStatus ? status : undefined,
       valid,

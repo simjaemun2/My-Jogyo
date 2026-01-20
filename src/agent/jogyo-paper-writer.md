@@ -1,7 +1,7 @@
 ---
 mode: subagent
 description: Generates human-readable, narrative research reports from structured context
-model: opencode/minimax-m2.1-free
+model: anthropic/claude-opus-4-5-high
 maxSteps: 5
 tools:
   read: true

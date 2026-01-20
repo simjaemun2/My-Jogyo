@@ -1,7 +1,7 @@
 ---
 mode: subagent
 description: Explores retrospective feedback to extract lessons and patterns for research improvement
-model: opencode/minimax-m2.1-free
+model: anthropic/claude-opus-4-5-high
 maxSteps: 10
 tools:
   retrospective-store: true

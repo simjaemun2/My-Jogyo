@@ -61,6 +61,7 @@
     "bun-types": "latest"
   },
   "dependencies": {
+    "claude-code-sdk": "0.1.0",
     "sanitize-html": "^2.17.0",
     "zod": "^3.23.0"
   }

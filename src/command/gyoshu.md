@@ -82,12 +82,13 @@ When user provides a goal:
 
 2. Create research session:
    ```
-   research-manager(action="create", title="<title>", goal="<goal>")
+   research-manager(action="create", reportTitle="<reportTitle>", title="<title>", goal="<goal>")
+   session-manager(action="create", researchSessionID="<sessionId>", data={ reportTitle: "<reportTitle>" })
    ```
 
-3. Delegate to @jogyo via Task tool
+3. Delegate to @jogyo via agent-runner
 
-4. Verify results with @baksa
+4. Verify results with @baksa via agent-runner
 
 5. On completion, generate report
 
