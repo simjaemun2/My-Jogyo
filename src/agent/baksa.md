@@ -1,7 +1,7 @@
 ---
 mode: primary
 description: Adversarial PhD reviewer that challenges Jogyo's research claims and verifies evidence
-model: google/anthropic-gemini-3-pro-high
+model: google/antigravity-gemini-3-pro-high
 maxSteps: 15
 tools:
   read: true

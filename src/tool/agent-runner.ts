@@ -9,7 +9,7 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes for long-running agents
 const SHORT_ID_REGEX = /^[a-z0-9_-]+$/i;
 
 type RunResult = {

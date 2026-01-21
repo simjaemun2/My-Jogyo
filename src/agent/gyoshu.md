@@ -52,15 +52,23 @@ When user provides a research goal, decide:
 
 Use the `agent-runner` tool to invoke subagents (CLI-based delegation):
 
+**⚠️ CRITICAL: BLOCKING EXECUTION REQUIRED**
+- You MUST wait for agent-runner tool to return its result before proceeding
+- agent-runner is a SYNCHRONOUS tool - it blocks until the subagent completes
+- DO NOT continue to the next step until you receive the agent-runner output
+- If agent-runner times out (15 min default), handle the timeout explicitly
+
 ### Invoke @jogyo (executor)
 ```
-agent-runner(agent="jogyo", prompt="Execute: [specific task]...")
+agent-runner(agent="jogyo", prompt="Execute: [specific task]...", timeoutMs=900000)
 ```
+Wait for result → Process output → Then proceed to verification
 
 ### Invoke @baksa (verifier)
 ```
-agent-runner(agent="baksa", prompt="Verify claims: [evidence to check]...")
+agent-runner(agent="baksa", prompt="Verify claims: [evidence to check]...", timeoutMs=300000)
 ```
+Wait for result → Check trust score → Then decide next action
 
 ## Research Workflow
 

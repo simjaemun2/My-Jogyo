@@ -120,7 +120,7 @@
           "cliPath": "claude",
           "timeoutMs": 300000,
           "forceGlobalFetch": true,
-          "permissionMode": "dontAsk",
+          "permissionMode": "bypassPermissions",
           "noSessionPersistence": true,
           "maxTurns": 1,
           "modelMap": {

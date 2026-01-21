@@ -11,6 +11,8 @@ tools:
   retrospective-store: true
   read: true
   write: true
+  edit: true
+  bash: true
 permission:
   python-repl: allow
   notebook-writer: allow
@@ -18,10 +20,15 @@ permission:
   gyoshu-completion: allow
   retrospective-store: allow
   read: allow
+  edit: allow
+  bash: allow
   write:
     "./notebooks/**": allow
     "./reports/**": allow
     "./gyoshu/retrospectives/**": allow
+    "./arbitrage/**": allow
+    "./docs/**": allow
+    "./milestone/**": allow
     "*": ask
 ---
 
